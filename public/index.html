@@ -1,111 +1,835 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-<meta charset="utf-8">
-<title>ตรวจโรคข้าวจากรูปภาพ</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RiceCare AI - ระบบเฝ้าระวังสุขภาพข้าว</title>
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore-compat.js"></script>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; }
-  #preview { max-width: 100%; border-radius: 8px; margin: 12px 0; display: none; }
-  #status { color: #666; font-size: 14px; }
-  #result { margin-top: 16px; padding: 16px; border-radius: 8px; background: #f4f4f4; display: none; }
-  #result h3 { margin: 0 0 8px; }
-  .bar-row { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0; }
-  .bar-track { flex: 1; background: #ddd; border-radius: 4px; height: 8px; overflow: hidden; }
-  .bar-fill { height: 100%; background: #2a7; }
+  :root{
+    --bg: #0c1410;
+    --bg-soft: #0f1a14;
+    --card: #131f19;
+    --card-2: #17251d;
+    --border: #223229;
+    --green: #34d399;
+    --green-dark: #16a34a;
+    --gold: #fbbf24;
+    --text: #eaf3ee;
+    --text-muted: #90a89c;
+    --danger: #f87171;
+    --info: #60a5fa;
+    --radius: 16px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;}
+  body{background:var(--bg);color:var(--text);min-height:100vh;}
+  button{font-family:inherit;}
+  ::placeholder{color:#5c7267;}
+
+  #auth-screen{
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:
+      radial-gradient(circle at 15% 20%, rgba(52,211,153,0.12), transparent 40%),
+      radial-gradient(circle at 85% 80%, rgba(251,191,36,0.10), transparent 40%),
+      var(--bg);
+    padding:20px;
+  }
+  .auth-card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    width:100%;
+    max-width:380px;
+    padding:32px 28px;
+    box-shadow:0 20px 50px rgba(0,0,0,0.4);
+  }
+  .auth-logo{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
+  .auth-logo .emoji{font-size:1.8rem;}
+  .auth-logo span{font-size:1.3rem;font-weight:700;}
+  .auth-sub{color:var(--text-muted);font-size:0.85rem;margin-bottom:24px;}
+  .auth-tabs{display:flex;background:var(--card-2);border-radius:10px;padding:4px;margin-bottom:22px;}
+  .auth-tab{flex:1;text-align:center;padding:8px;border-radius:8px;cursor:pointer;font-size:0.9rem;color:var(--text-muted);transition:0.2s;}
+  .auth-tab.active{background:var(--green-dark);color:#fff;font-weight:600;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:0.8rem;color:var(--text-muted);margin-bottom:5px;}
+  .field input{
+    width:100%;
+    padding:11px 12px;
+    border-radius:9px;
+    border:1px solid var(--border);
+    background:var(--bg-soft);
+    color:var(--text);
+    font-size:0.92rem;
+    outline:none;
+  }
+  .field input:focus{border-color:var(--green);}
+  .loc-row{display:flex;gap:8px;}
+  .loc-row input{flex:1;}
+  .geo-btn{
+    background:var(--card-2);
+    border:1px solid var(--border);
+    color:var(--text);
+    border-radius:9px;
+    padding:0 12px;
+    cursor:pointer;
+    font-size:0.85rem;
+    white-space:nowrap;
+  }
+  .geo-btn:hover{border-color:var(--green);}
+  .auth-submit{
+    width:100%;
+    padding:12px;
+    border:none;
+    border-radius:10px;
+    background:linear-gradient(135deg,var(--green),var(--green-dark));
+    color:#04140c;
+    font-weight:700;
+    font-size:0.95rem;
+    cursor:pointer;
+    margin-top:6px;
+  }
+  .auth-submit:hover{filter:brightness(1.08);}
+  .auth-error{
+    background:rgba(248,113,113,0.12);
+    border:1px solid rgba(248,113,113,0.4);
+    color:#fecaca;
+    font-size:0.82rem;
+    padding:8px 10px;
+    border-radius:8px;
+    margin-bottom:14px;
+    display:none;
+  }
+  .auth-note{font-size:0.72rem;color:var(--text-muted);margin-top:16px;line-height:1.5;}
+
+  #dashboard{display:none;}
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 28px;
+    border-bottom:1px solid var(--border);
+    background:var(--bg-soft);
+    flex-wrap:wrap;
+    gap:12px;
+  }
+  .brand{display:flex;align-items:center;gap:10px;}
+  .brand .emoji{font-size:1.6rem;}
+  .brand-text h1{font-size:1.05rem;}
+  .brand-text p{font-size:0.7rem;color:var(--text-muted);}
+  .nav-pills{display:flex;gap:6px;flex-wrap:wrap;}
+  .nav-pill{
+    padding:7px 14px;
+    border-radius:20px;
+    font-size:0.82rem;
+    color:var(--text-muted);
+    cursor:default;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .nav-pill.active{background:rgba(52,211,153,0.15);color:var(--green);font-weight:600;}
+  .topbar-right{display:flex;align-items:center;gap:14px;position:relative;}
+  .bell{font-size:1.2rem;color:var(--text-muted);cursor:default;}
+  .user-chip{display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 8px;border-radius:20px;}
+  .user-chip:hover{background:var(--card-2);}
+  .avatar{
+    width:34px;height:34px;border-radius:50%;
+    background:linear-gradient(135deg,var(--green),var(--green-dark));
+    display:flex;align-items:center;justify-content:center;
+    font-weight:700;color:#04140c;font-size:0.9rem;
+  }
+  .user-chip .uname{font-size:0.82rem;line-height:1.1;}
+  .user-chip .uname small{display:block;color:var(--text-muted);font-size:0.68rem;}
+  .user-dropdown{
+    display:none;
+    position:absolute;
+    top:46px;right:0;
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:10px;
+    min-width:150px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.4);
+    overflow:hidden;
+    z-index:20;
+  }
+  .user-dropdown.show{display:block;}
+  .user-dropdown button{
+    width:100%;text-align:left;padding:10px 14px;background:none;border:none;color:var(--text);
+    cursor:pointer;font-size:0.85rem;
+  }
+  .user-dropdown button:hover{background:var(--card-2);}
+
+  .page{padding:22px 28px 40px;max-width:1400px;margin:0 auto;}
+
+  .grid-top{display:grid;grid-template-columns:1.3fr 1fr;gap:18px;margin-bottom:18px;}
+  @media (max-width:1000px){.grid-top{grid-template-columns:1fr;}}
+
+  .hero{
+    border-radius:var(--radius);
+    overflow:hidden;
+    position:relative;
+    min-height:230px;
+    display:flex;
+    align-items:flex-end;
+    padding:22px;
+    border:1px solid var(--border);
+  }
+  .hero svg{position:absolute;inset:0;width:100%;height:100%;z-index:0;}
+  .hero-content{position:relative;z-index:1;}
+  .hero-content h2{font-size:1.6rem;margin-bottom:4px;}
+  .hero-content p{color:#dfece5;font-size:0.88rem;margin-bottom:10px;}
+  .hero-loc{
+    display:inline-flex;align-items:center;gap:6px;
+    background:rgba(0,0,0,0.35);
+    padding:6px 12px;border-radius:20px;font-size:0.8rem;
+    backdrop-filter:blur(4px);
+  }
+
+  .card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:18px 20px;
+  }
+  .card h3{font-size:0.95rem;display:flex;align-items:center;gap:8px;margin-bottom:14px;}
+  .card h3 .updated{margin-left:auto;font-size:0.68rem;color:var(--text-muted);font-weight:normal;}
+
+  .weather-now{display:flex;align-items:center;gap:14px;margin-bottom:16px;}
+  .weather-now .wicon{font-size:2.6rem;}
+  .weather-now .wtemp{font-size:2.2rem;font-weight:700;}
+  .weather-now .wtemp span{font-size:1rem;font-weight:400;color:var(--text-muted);}
+  .weather-now .wdesc{font-size:0.8rem;color:var(--text-muted);}
+
+  .mini-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  .mini-stat{background:var(--card-2);border-radius:10px;padding:10px;text-align:center;}
+  .mini-stat .mi{font-size:1.1rem;}
+  .mini-stat .ml{font-size:0.68rem;color:var(--text-muted);margin:3px 0 2px;}
+  .mini-stat .mv{font-size:0.95rem;font-weight:700;}
+
+  .sensor-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:14px;}
+  .sensor-mini{background:var(--card-2);border-radius:10px;padding:10px 12px;display:flex;gap:8px;align-items:center;}
+  .sensor-mini .si{font-size:1.3rem;}
+  .sensor-mini .sl{font-size:0.68rem;color:var(--text-muted);}
+  .sensor-mini .sv{font-size:0.92rem;font-weight:700;}
+
+  .grid-mid{display:grid;grid-template-columns:1.3fr 1fr;gap:18px;margin-bottom:18px;}
+  @media (max-width:1000px){.grid-mid{grid-template-columns:1fr;}}
+
+  .forecast-strip{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;}
+  .fday{
+    flex:0 0 auto;width:88px;background:var(--card-2);border-radius:12px;padding:12px 8px;text-align:center;
+    border:1px solid transparent;
+  }
+  .fday.today{border-color:var(--green);}
+  .fday .fd{font-size:0.75rem;color:var(--text-muted);}
+  .fday .fdate{font-size:0.68rem;color:#5c7267;margin-bottom:6px;}
+  .fday .fic{font-size:1.4rem;margin:6px 0;}
+  .fday .fpop{font-size:0.68rem;color:var(--info);}
+  .fday .ftemp{font-size:0.75rem;margin-top:4px;}
+
+  .reco-item{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);}
+  .reco-item:last-child{border-bottom:none;}
+  .reco-icon{font-size:1.2rem;}
+  .reco-text strong{font-size:0.85rem;display:block;}
+  .reco-text span{font-size:0.75rem;color:var(--text-muted);}
+  .reco-tag{margin-left:auto;font-size:0.65rem;padding:3px 8px;border-radius:10px;background:rgba(52,211,153,0.15);color:var(--green);white-space:nowrap;height:fit-content;}
+  .reco-tag.warn{background:rgba(251,191,36,0.15);color:var(--gold);}
+
+  .grid-bottom{display:grid;grid-template-columns:1fr 1.3fr;gap:18px;margin-bottom:18px;}
+  @media (max-width:1000px){.grid-bottom{grid-template-columns:1fr;}}
+
+  .donut-wrap{display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
+  .donut{width:120px;height:120px;flex-shrink:0;}
+  .donut-label{position:relative;text-align:center;margin-top:-84px;}
+  .donut-label .pct{font-size:1.5rem;font-weight:700;}
+  .donut-label .plabel{font-size:0.68rem;color:var(--text-muted);}
+  .health-list{flex:1;min-width:160px;display:flex;flex-direction:column;gap:8px;}
+  .health-row{display:flex;justify-content:space-between;font-size:0.8rem;}
+  .health-row span:last-child{font-weight:600;}
+  .ok{color:var(--green);}
+  .warn-txt{color:var(--gold);}
+
+  .alert-item{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);}
+  .alert-item:last-child{border-bottom:none;}
+  .alert-dot{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0.95rem;}
+  .alert-dot.warn{background:rgba(251,191,36,0.15);}
+  .alert-dot.info{background:rgba(96,165,250,0.15);}
+  .alert-dot.danger{background:rgba(248,113,113,0.15);}
+  .alert-text strong{display:block;font-size:0.82rem;}
+  .alert-text span{font-size:0.72rem;color:var(--text-muted);}
+  .alert-time{margin-left:auto;font-size:0.68rem;color:#5c7267;white-space:nowrap;}
+
+  .chat-card{display:flex;flex-direction:column;height:560px;}
+  .chat-box{flex-grow:1;border:1px solid var(--border);border-radius:12px;padding:15px;overflow-y:auto;background:var(--bg-soft);margin-bottom:10px;}
+  .message{margin-bottom:12px;padding:10px 14px;border-radius:10px;max-width:85%;line-height:1.5;font-size:0.9rem;white-space:pre-wrap;}
+  .user-message{background:var(--green-dark);color:#eafff3;margin-left:auto;border-bottom-right-radius:2px;}
+  .ai-message{background:var(--card-2);color:var(--text);margin-right:auto;border-bottom-left-radius:2px;border-left:3px solid var(--gold);}
+  .ai-message.loading{color:var(--text-muted);font-style:italic;}
+  .ai-message.error{border-left-color:var(--danger);color:#fecaca;}
+  .message img.chat-thumb{max-width:180px;border-radius:8px;display:block;margin-top:6px;}
+  .image-preview-container{display:none;align-items:center;gap:10px;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-bottom:8px;}
+  .image-preview-container img{width:44px;height:44px;object-fit:cover;border-radius:6px;}
+  .image-preview-container .remove-image-btn{margin-left:auto;background:none;border:none;color:var(--danger);font-weight:bold;cursor:pointer;font-size:1.1rem;}
+  .chat-input-area{display:flex;gap:8px;}
+  .chat-input-area input{flex-grow:1;padding:11px;border:1px solid var(--border);border-radius:9px;outline:none;background:var(--bg-soft);color:var(--text);}
+  .chat-input-area button{background:var(--green-dark);color:#eafff3;border:none;padding:0 18px;border-radius:9px;cursor:pointer;font-weight:700;}
+  .chat-input-area button:hover{filter:brightness(1.1);}
+  .chat-input-area button:disabled{background:#374b40;cursor:not-allowed;}
+  .attach-btn{background:var(--card-2);border:1px solid var(--border);border-radius:9px;width:44px;font-size:1.1rem;cursor:pointer;color:var(--text);flex-shrink:0;}
+  .attach-btn:hover{border-color:var(--green);}
 </style>
 </head>
 <body>
-  <h1>ตรวจโรคใบข้าว</h1>
-  <p>อัปโหลดรูปใบข้าว ระบบจะคัดแยกก่อนว่าใช่ใบข้าวหรือไม่ แล้วค่อยวิเคราะห์โรค</p>
 
-  <input type="file" id="fileInput" accept="image/*">
-  <img id="preview">
-  <p id="status"></p>
+  <div id="auth-screen">
+    <div class="auth-card">
+      <div class="auth-logo"><span class="emoji">🌾</span><span>RiceCare AI</span></div>
+      <p class="auth-sub">เข้าสู่ระบบเพื่อดูข้อมูลแปลงนาของคุณ</p>
 
-  <div id="result">
-    <h3 id="resultTitle"></h3>
-    <div id="resultBars"></div>
-    <p id="advice"></p>
+      <div class="auth-tabs">
+        <div class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">เข้าสู่ระบบ</div>
+        <div class="auth-tab" id="tab-register" onclick="switchAuthTab('register')">สมัครสมาชิก</div>
+      </div>
+
+      <div class="auth-error" id="auth-error"></div>
+
+      <form id="login-form" onsubmit="return handleLogin(event)">
+        <div class="field">
+          <label>ชื่อสมาชิก</label>
+          <input type="text" id="login-name" placeholder="ชื่อที่ใช้สมัคร" required>
+        </div>
+        <div class="field">
+          <label>รหัสผ่าน</label>
+          <input type="password" id="login-password" placeholder="••••••••" required>
+        </div>
+        <button type="submit" class="auth-submit">เข้าสู่ระบบ</button>
+      </form>
+
+      <form id="register-form" style="display:none;" onsubmit="return handleRegister(event)">
+        <div class="field">
+          <label>ชื่อสมาชิก</label>
+          <input type="text" id="reg-name" placeholder="เช่น สมชาย ใจดี" required>
+        </div>
+        <div class="field">
+          <label>รหัสผ่าน</label>
+          <input type="password" id="reg-password" placeholder="อย่างน้อย 6 ตัวอักษร" required>
+        </div>
+        <div class="field">
+          <label>ตำแหน่งที่ตั้งแปลงนา</label>
+          <div class="loc-row">
+            <input type="text" id="reg-location" placeholder="เช่น ต.ในเมือง อ.เมือง จ.สุพรรณบุรี" required>
+            <button type="button" class="geo-btn" onclick="useCurrentLocation()">📍 ใช้ตำแหน่งปัจจุบัน</button>
+          </div>
+        </div>
+        <button type="submit" class="auth-submit">สมัครสมาชิก</button>
+      </form>
+
+      <p class="auth-note">🔒 ระบบสมาชิกนี้เชื่อมต่อกับ Firebase Authentication จริง รหัสผ่านถูกเข้ารหัสและจัดการโดย Firebase (ไม่ได้เก็บเป็นข้อความธรรมดา) เข้าสู่ระบบได้จากทุกเครื่อง/เบราว์เซอร์ด้วยชื่อสมาชิกและรหัสผ่านเดียวกัน</p>
+    </div>
   </div>
 
-  <!-- canvas ที่มองไม่เห็น ใช้แค่ resize รูปเป็น 224x224 -->
-  <canvas id="canvas" width="224" height="224" style="display:none"></canvas>
+  <div id="dashboard">
+    <div class="topbar">
+      <div class="brand">
+        <span class="emoji">🌾</span>
+        <div class="brand-text">
+          <h1>RiceCare AI</h1>
+          <p>ระบบเฝ้าระวังสุขภาพข้าวและพยากรณ์อากาศ</p>
+        </div>
+      </div>
+      <div class="nav-pills">
+        <div class="nav-pill active">🏠 หน้าแรก</div>
+        <div class="nav-pill">⛅ พยากรณ์อากาศ</div>
+        <div class="nav-pill">🌱 การเพาะปลูก</div>
+        <div class="nav-pill">🔔 แจ้งเตือน</div>
+        <div class="nav-pill">📋 รายงาน</div>
+      </div>
+      <div class="topbar-right">
+        <span class="bell">🔔</span>
+        <div class="user-chip" id="user-chip" onclick="toggleUserMenu()">
+          <div class="avatar" id="user-avatar">ก</div>
+          <div class="uname" id="user-namebox">เกษตรกร<small>สมาชิก</small></div>
+        </div>
+        <div class="user-dropdown" id="user-dropdown">
+          <button onclick="handleLogout()">🚪 ออกจากระบบ</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="page">
+
+      <div class="grid-top">
+        <div class="hero">
+          <svg viewBox="0 0 600 260" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#0b1a2b"/>
+                <stop offset="55%" stop-color="#3a5a63"/>
+                <stop offset="100%" stop-color="#6f8f4a"/>
+              </linearGradient>
+            </defs>
+            <rect width="600" height="260" fill="url(#sky)"/>
+            <circle cx="470" cy="90" r="45" fill="#ffe9a8" opacity="0.85"/>
+            <path d="M0 190 L600 190 L600 260 L0 260 Z" fill="#3f5c33"/>
+            <path d="M0 200 L600 195 L600 260 L0 260 Z" fill="#4b6a3b"/>
+            <g stroke="#2f4527" stroke-width="2" opacity="0.6">
+              <path d="M20 260 C 15 230 25 215 20 195"/>
+              <path d="M60 260 C 55 225 65 210 58 190"/>
+              <path d="M100 260 C 95 230 105 215 98 195"/>
+              <path d="M300 260 C 295 225 305 210 298 190"/>
+              <path d="M340 260 C 335 230 345 215 338 195"/>
+              <path d="M500 260 C 495 225 505 210 498 190"/>
+              <path d="M540 260 C 535 230 545 215 538 195"/>
+            </g>
+          </svg>
+          <div class="hero-content">
+            <h2 id="hero-greeting">สวัสดีตอนเช้า 🌤️</h2>
+            <p>วางแผนวันนี้ เพื่อผลผลิตที่ดีกว่าในวันพรุ่งนี้</p>
+            <span class="hero-loc">📍 <span id="hero-location">-</span></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>🌦️ สภาพอากาศปัจจุบัน <span class="updated" id="last-updated">อัปเดตล่าสุด --:--</span></h3>
+          <div class="weather-now">
+            <span class="wicon" id="weather-now-icon">🌦️</span>
+            <div>
+              <div class="wtemp"><span id="temp-val">31.5</span><span>°C</span></div>
+              <div class="wdesc" id="weather-now-desc">ฝนตกปรอยๆ บางส่วน</div>
+            </div>
+          </div>
+          <div class="mini-stats">
+            <div class="mini-stat"><div class="mi">💧</div><div class="ml">ความชื้น</div><div class="mv"><span id="humidity-val">78</span>%</div></div>
+            <div class="mini-stat"><div class="mi">💨</div><div class="ml">ลม</div><div class="mv"><span id="wind-speed-val">12</span> กม./ชม.</div></div>
+            <div class="mini-stat"><div class="mi">🧭</div><div class="ml">ทิศลม</div><div class="mv" id="wind-dir-val" style="font-size:0.78rem;">ตอ.ใต้</div></div>
+          </div>
+          <div class="sensor-strip">
+            <div class="sensor-mini"><span class="si">🌱</span><div><div class="sl">ความชื้นดิน</div><div class="sv"><span id="soil-moisture-val">42</span>%</div></div></div>
+            <div class="sensor-mini"><span class="si">🧪</span><div><div class="sl">pH ดิน</div><div class="sv"><span id="soil-ph-val">6.3</span></div></div></div>
+            <div class="sensor-mini"><span class="si">☀️</span><div><div class="sl">ความเข้มแสง</div><div class="sv"><span id="light-val">32,000</span> lux</div></div></div>
+            <div class="sensor-mini"><span class="si">🌧️</span><div><div class="sl">ฝน 24 ชม.</div><div class="sv"><span id="rainfall-val">3.2</span> มม.</div></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-mid">
+        <div class="card">
+          <h3>📅 พยากรณ์อากาศ 7 วันข้างหน้า</h3>
+          <div class="forecast-strip" id="forecast-strip"></div>
+        </div>
+        <div class="card">
+          <h3>🤖 คำแนะนำ AI สำหรับแปลงของคุณ</h3>
+          <div id="reco-list"></div>
+        </div>
+      </div>
+
+      <div class="grid-bottom">
+        <div class="card">
+          <h3>🌾 ภาพรวมแปลงปลูก</h3>
+          <div class="donut-wrap">
+            <div>
+              <svg class="donut" viewBox="0 0 120 120">
+                <circle cx="60" cy="60" r="50" fill="none" stroke="#223229" stroke-width="12"/>
+                <circle id="donut-ring" cx="60" cy="60" r="50" fill="none" stroke="#34d399" stroke-width="12"
+                  stroke-dasharray="314" stroke-dashoffset="80" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+              </svg>
+              <div class="donut-label"><div class="pct" id="health-pct">75%</div><div class="plabel">สุขภาพข้าวดี</div></div>
+            </div>
+            <div class="health-list">
+              <div class="health-row"><span>💧 ความชื้นดิน</span><span id="hr-soil" class="ok">เหมาะสม</span></div>
+              <div class="health-row"><span>🧪 pH ดิน</span><span id="hr-ph" class="ok">เหมาะสม</span></div>
+              <div class="health-row"><span>🍃 สถานะใบข้าว</span><span class="warn-txt">มีจุดสีน้ำตาลเล็กน้อย</span></div>
+              <div class="health-row"><span>🌡️ อุณหภูมิ</span><span id="hr-temp" class="ok">ปกติ</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>🔔 แจ้งเตือนล่าสุด</h3>
+          <div id="alert-list"></div>
+        </div>
+      </div>
+
+      <div class="card chat-card">
+        <h3>💬 ปรึกษาหมอข้าว AI (Gemini)</h3>
+        <div class="chat-box" id="chat-box">
+          <div class="message ai-message">สวัสดีครับ ผมคือ AI ผู้เชี่ยวชาญด้านข้าวไทย สามารถสอบถามเรื่องโรคข้าว วิธีแก้ หรือยี่ห้อปุ๋ยที่ควรใช้ได้เลยครับ! หรือจะแนบรูปใบข้าว/ต้นข้าวมาให้ผมช่วยวิเคราะห์ก็ได้นะครับ 📷</div>
+        </div>
+        <div class="image-preview-container" id="image-preview-container">
+          <img id="image-preview" src="" alt="รูปที่แนบ">
+          <span>แนบรูปแล้ว</span>
+          <button type="button" class="remove-image-btn" id="remove-image-btn">✕</button>
+        </div>
+        <div class="chat-input-area">
+          <button type="button" class="attach-btn" id="attach-btn" title="แนบรูปใบข้าว">📷</button>
+          <input type="file" id="image-input" accept="image/*" style="display:none;">
+          <input type="text" id="user-input" placeholder="พิมพ์ถาม เช่น ใบข้าวมีจุดสีน้ำตาลใช้ปุ๋ยยี่ห้อไหนดี...">
+          <button id="send-btn">ส่ง</button>
+        </div>
+      </div>
+      <!-- canvas ที่มองไม่เห็น ใช้ resize รูปเป็น 224x224 ก่อนป้อนเข้าโมเดล WASM คัดแยกใบข้าว/วิเคราะห์โรค -->
+      <canvas id="ei-canvas" width="224" height="224" style="display:none"></canvas>
+
+    </div>
+  </div>
 
 <script>
-// ปรับ URL นี้เป็น Cloudflare Worker ที่คุณ deploy ไว้สำหรับเรียก Gemini
-const GEMINI_WORKER_URL = "https://your-worker-subdomain.workers.dev/summarize";
+/* ==================================================================
+   Firebase — ระบบสมาชิกจริง (Authentication + Firestore)
+   ใช้ "ชื่อสมาชิก" แทนอีเมล โดยแปลงเป็นอีเมลปลอมภายใน (Firebase Auth
+   ต้องการอีเมลเสมอ) รหัสผ่านจะถูกจัดการ/เข้ารหัสโดย Firebase เอง
+   ไม่ได้เก็บเป็นข้อความธรรมดาในฐานข้อมูลอีกต่อไป
+   ================================================================== */
+const firebaseConfig = {
+  apiKey: "AIzaSyAbPRbG69QWmoQhkkDhQsURdwe4YTxnqBc",
+  authDomain: "ricecare-ai.firebaseapp.com",
+  projectId: "ricecare-ai",
+  storageBucket: "ricecare-ai.firebasestorage.app",
+  messagingSenderId: "291932474531",
+  appId: "1:291932474531:web:5bd7a9dce92e46394f0316",
+  measurementId: "G-K2CQSJ4M7Q"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
 
-const fileInput = document.getElementById('fileInput');
-const preview = document.getElementById('preview');
-const statusEl = document.getElementById('status');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-// สร้าง web worker แยกกันคนละตัว เพื่อไม่ให้ Module ของ Edge Impulse ทับกัน
-const leafWorker = new Worker('leaf-worker.js');
-const diseaseWorker = new Worker('disease-worker.js');
-
-// กล่อง debug log ที่มองเห็นได้บนหน้าเว็บ (ไม่ต้องพึ่ง DevTools/Console)
-const debugBox = document.createElement('pre');
-debugBox.style.cssText = 'background:#222;color:#0f0;padding:10px;font-size:12px;white-space:pre-wrap;max-height:200px;overflow:auto;margin-top:16px;border-radius:6px;';
-document.body.appendChild(debugBox);
-function debugLog(text) {
-  const time = new Date().toLocaleTimeString();
-  debugBox.textContent += `[${time}] ${text}\n`;
-  debugBox.scrollTop = debugBox.scrollHeight;
+function nameToPseudoEmail(name) {
+  // เข้ารหัสชื่อ (รองรับภาษาไทย/ยูนิโค้ดทุกภาษา) เป็น base64 ที่ปลอดภัยสำหรับใช้ในอีเมล
+  // วิธีเดิมที่กรองเฉพาะ a-z0-9 ทำให้ชื่อภาษาไทยทุกชื่อกลายเป็นค่าว่างและชนกันหมด จึงแก้เป็นแบบนี้แทน
+  const normalized = name.trim().toLowerCase();
+  const encoded = btoa(unescape(encodeURIComponent(normalized)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return `u${encoded}@ricecare-ai.local`;
 }
 
-// ดักจับ error ที่เกิดตอนโหลด worker เอง (เช่น importScripts หาไฟล์ไม่เจอ)
-leafWorker.onerror = (e) => {
-  debugLog(`❌ leaf-worker error: ${e.message} (${e.filename}:${e.lineno})`);
-  setStatus('เกิดข้อผิดพลาดตอนโหลดโมเดลคัดแยกใบข้าว ดู log ด้านล่าง');
-};
-diseaseWorker.onerror = (e) => {
-  debugLog(`❌ disease-worker error: ${e.message} (${e.filename}:${e.lineno})`);
-  setStatus('เกิดข้อผิดพลาดตอนโหลดโมเดลวิเคราะห์โรค ดู log ด้านล่าง');
-};
+function switchAuthTab(tab) {
+  document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+  document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+  document.getElementById('login-form').style.display = tab === 'login' ? 'block' : 'none';
+  document.getElementById('register-form').style.display = tab === 'register' ? 'block' : 'none';
+  hideAuthError();
+}
 
-// ฟัง progress message ที่ worker ส่งมาระหว่างโหลด (แยกจาก message ที่เป็นผลลัพธ์จริง)
-leafWorker.addEventListener('message', (e) => {
-  if (e.data.progress) debugLog('[leaf-gate] ' + e.data.progress);
-});
-diseaseWorker.addEventListener('message', (e) => {
-  if (e.data.progress) debugLog('[disease] ' + e.data.progress);
-});
+function showAuthError(msg) {
+  const el = document.getElementById('auth-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+function hideAuthError() {
+  document.getElementById('auth-error').style.display = 'none';
+}
 
-debugLog('เริ่มโหลด worker ทั้งสองตัว...');
-
-// เช็ค header ของไฟล์ .wasm โดยตรง เพื่อดูว่า server ส่ง content-type ถูกไหม
-fetch('./models/leaf-gate/edge-impulse-standalone.wasm', { method: 'HEAD' })
-  .then(res => debugLog(`เช็คไฟล์ wasm (leaf-gate): status=${res.status}, content-type=${res.headers.get('content-type')}, size=${res.headers.get('content-length')}`))
-  .catch(err => debugLog('❌ เช็คไฟล์ wasm (leaf-gate) ไม่สำเร็จ: ' + err.message));
-
-function setStatus(text) { statusEl.textContent = text; }
-
-// รอผลจาก worker แบบ promise (ยิงคำขอเดียว รอผลเดียว) พร้อม timeout กันค้างตลอดกาล
-function askWorker(worker, features, label, timeoutMs = 45000) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      worker.removeEventListener('message', handler);
-      reject(new Error(`${label}: ไม่ตอบกลับภายใน ${timeoutMs / 1000} วินาที (อาจโหลดโมเดลไม่สำเร็จ)`));
-    }, timeoutMs);
-    const handler = (e) => {
-      if (e.data.progress) return; // ข้าม progress message ไป ไม่ใช่ผลลัพธ์
-      clearTimeout(timer);
-      worker.removeEventListener('message', handler);
-      if (e.data.error) reject(new Error(`${label}: ${e.data.error}`));
-      else resolve(e.data.result);
-    };
-    worker.addEventListener('message', handler);
-    debugLog(`ส่งข้อมูลไป ${label}...`);
-    worker.postMessage({ features });
+function setAuthLoading(isLoading) {
+  document.querySelectorAll('.auth-submit').forEach(btn => {
+    btn.disabled = isLoading;
+    btn.textContent = isLoading ? 'กำลังดำเนินการ...' : (btn.closest('#login-form') ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก');
   });
+}
+
+function mapFirebaseError(err) {
+  const code = err && err.code;
+  const map = {
+    'auth/email-already-in-use': 'มีชื่อสมาชิกนี้อยู่แล้ว กรุณาใช้ชื่ออื่น',
+    'auth/invalid-email': 'ชื่อสมาชิกมีอักขระที่ไม่รองรับ กรุณาใช้ตัวอักษร/ตัวเลขภาษาอังกฤษ',
+    'auth/weak-password': 'รหัสผ่านสั้นเกินไป ต้องมีอย่างน้อย 6 ตัวอักษร',
+    'auth/user-not-found': 'ไม่พบชื่อสมาชิกนี้ในระบบ',
+    'auth/wrong-password': 'รหัสผ่านไม่ถูกต้อง',
+    'auth/invalid-credential': 'ชื่อสมาชิกหรือรหัสผ่านไม่ถูกต้อง',
+    'auth/too-many-requests': 'ลองผิดหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่',
+    'auth/network-request-failed': 'เชื่อมต่ออินเทอร์เน็ตไม่ได้ กรุณาตรวจสอบสัญญาณ',
+  };
+  return map[code] || ('เกิดข้อผิดพลาด: ' + (err.message || code));
+}
+
+function useCurrentLocation() {
+  if (!navigator.geolocation) {
+    showAuthError('เบราว์เซอร์นี้ไม่รองรับการขอตำแหน่งปัจจุบัน');
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude.toFixed(5);
+      const lng = pos.coords.longitude.toFixed(5);
+      document.getElementById('reg-location').value = `พิกัด ${lat}, ${lng}`;
+    },
+    () => showAuthError('ไม่สามารถดึงตำแหน่งปัจจุบันได้ กรุณาพิมพ์ที่อยู่แปลงนาเอง'),
+  );
+}
+
+async function handleRegister(e) {
+  e.preventDefault();
+  hideAuthError();
+  const name = document.getElementById('reg-name').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const location = document.getElementById('reg-location').value.trim();
+
+  if (!name || !password || !location) { showAuthError('กรุณากรอกข้อมูลให้ครบทุกช่อง'); return false; }
+  if (password.length < 6) { showAuthError('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร (ข้อกำหนดของ Firebase)'); return false; }
+
+  setAuthLoading(true);
+  try {
+    const pseudoEmail = nameToPseudoEmail(name);
+    const cred = await auth.createUserWithEmailAndPassword(pseudoEmail, password);
+    await cred.user.updateProfile({ displayName: name });
+    // onAuthStateChanged จะพาเข้าหน้าแดชบอร์ดให้อัตโนมัติทันทีที่บรรทัดบนสำเร็จ
+    // แยก try/catch ตรงนี้ เพราะถ้าการเขียน Firestore ล้มเหลว จะได้เห็น error
+    // แบบ alert() ที่มองเห็นได้แน่นอน ไม่ว่าหน้าจอจะเปลี่ยนไปแดชบอร์ดแล้วหรือไม่
+    try {
+      await db.collection('users').doc(cred.user.uid).set({
+        name, location,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      console.log('✅ บันทึกข้อมูลลง Firestore สำเร็จ: users/' + cred.user.uid);
+    } catch (fireErr) {
+      console.error('❌ บันทึกข้อมูลลง Firestore ไม่สำเร็จ:', fireErr);
+      alert('สมัครสมาชิกสำเร็จ แต่บันทึกข้อมูล (ชื่อ/โลเคชั่น) ลง Firestore ไม่สำเร็จ:\n' + fireErr.message + '\n\nสาเหตุที่พบบ่อยที่สุดคือ Firestore Rules ยังไม่อนุญาตให้เขียนข้อมูล กรุณาตรวจสอบแท็บ Rules ใน Firebase Console');
+    }
+  } catch (err) {
+    showAuthError(mapFirebaseError(err));
+  } finally {
+    setAuthLoading(false);
+  }
+  return false;
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  hideAuthError();
+  const name = document.getElementById('login-name').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!name || !password) { showAuthError('กรุณากรอกชื่อสมาชิกและรหัสผ่าน'); return false; }
+
+  setAuthLoading(true);
+  try {
+    const pseudoEmail = nameToPseudoEmail(name);
+    await auth.signInWithEmailAndPassword(pseudoEmail, password);
+    // onAuthStateChanged จะพาเข้าหน้าแดชบอร์ดให้อัตโนมัติ
+  } catch (err) {
+    showAuthError(mapFirebaseError(err));
+  } finally {
+    setAuthLoading(false);
+  }
+  return false;
+}
+
+function handleLogout() {
+  auth.signOut();
+}
+
+function toggleUserMenu() {
+  document.getElementById('user-dropdown').classList.toggle('show');
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#user-chip') && !e.target.closest('#user-dropdown')) {
+    document.getElementById('user-dropdown').classList.remove('show');
+  }
+});
+
+async function enterDashboard(user) {
+  let name = user.displayName || 'เกษตรกร';
+  let location = '-';
+  try {
+    const doc = await db.collection('users').doc(user.uid).get();
+    if (doc.exists) {
+      const data = doc.data();
+      name = data.name || name;
+      location = data.location || location;
+    }
+  } catch (err) {
+    console.error('โหลดข้อมูลผู้ใช้จาก Firestore ไม่สำเร็จ:', err);
+  }
+
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  document.getElementById('user-namebox').innerHTML = `${name}<small>สมาชิก</small>`;
+  document.getElementById('user-avatar').textContent = name.charAt(0);
+  document.getElementById('hero-location').textContent = location;
+  setGreeting();
+  startSimulation();
+}
+
+// ตรวจสถานะล็อกอินอัตโนมัติทุกครั้งที่โหลดหน้า (ใช้ข้ามเครื่อง/เบราว์เซอร์ได้จริงผ่านบัญชี Firebase)
+auth.onAuthStateChanged((user) => {
+  if (user) {
+    enterDashboard(user);
+  } else {
+    document.getElementById('dashboard').style.display = 'none';
+    document.getElementById('auth-screen').style.display = 'flex';
+  }
+});
+
+function setGreeting() {
+  const hour = new Date().getHours();
+  let text = 'สวัสดีตอนเช้า 🌤️';
+  if (hour >= 11 && hour < 16) text = 'สวัสดีตอนบ่าย ☀️';
+  else if (hour >= 16 && hour < 19) text = 'สวัสดีตอนเย็น 🌇';
+  else if (hour >= 19 || hour < 5) text = 'สวัสดีตอนค่ำ 🌙';
+  document.getElementById('hero-greeting').textContent = text;
+}
+
+const windDirections = ['เหนือ','ตอ.เฉียงเหนือ','ตะวันออก','ตอ.เฉียงใต้','ใต้','ตต.เฉียงใต้','ตะวันตก','ตต.เฉียงเหนือ'];
+const dayNames = ['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
+const forecastIcons = ['☀️','🌤️','⛅','🌦️','🌧️','⛈️'];
+
+function buildForecast() {
+  const strip = document.getElementById('forecast-strip');
+  strip.innerHTML = '';
+  const today = new Date();
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    const icon = forecastIcons[Math.floor(Math.random() * forecastIcons.length)];
+    const pop = Math.floor(Math.random() * 80);
+    const lo = 24 + Math.floor(Math.random() * 3);
+    const hi = 31 + Math.floor(Math.random() * 5);
+    const div = document.createElement('div');
+    div.className = 'fday' + (i === 0 ? ' today' : '');
+    div.innerHTML = `
+      <div class="fd">${i === 0 ? 'วันนี้' : dayNames[d.getDay()]}</div>
+      <div class="fdate">${d.getDate()}/${d.getMonth()+1}</div>
+      <div class="fic">${icon}</div>
+      <div class="fpop">💧${pop}%</div>
+      <div class="ftemp">${lo}°/${hi}°</div>`;
+    strip.appendChild(div);
+  }
+}
+
+function updateRecommendations(s) {
+  const items = [];
+  if (s.soilMoisture < 38) items.push({icon:'💧', title:'ความชื้นดินต่ำ', desc:'แนะนำให้เพิ่มน้ำเข้านาเร็วๆ นี้', tag:'สำคัญ', warn:true});
+  if (s.humidity > 85) items.push({icon:'🍂', title:'ความชื้นอากาศสูง เสี่ยงโรคใบไหม้', desc:'ควรตรวจแปลงสม่ำเสมอ และควบคุมความชื้น', tag:'เฝ้าระวัง', warn:true});
+  if (s.soilPh < 5.5 || s.soilPh > 7) items.push({icon:'🧪', title:'ค่า pH ดินไม่อยู่ในช่วงเหมาะสม', desc:'ควรปรับปรุงดินด้วยปูนโดโลไมท์หรือวัสดุปรับ pH', tag:'แนะนำ'});
+  if (s.windSpeed > 22) items.push({icon:'💨', title:'ลมแรง ระวังต้นข้าวล้ม', desc:'หากข้าวออกรวงแล้วควรเสริมค้ำในจุดเสี่ยง', tag:'เฝ้าระวัง', warn:true});
+  if (items.length === 0) items.push({icon:'✅', title:'สภาพแปลงนาโดยรวมปกติดี', desc:'ยังไม่พบค่าผิดปกติจากเซ็นเซอร์ในตอนนี้', tag:'ปกติ'});
+  items.push({icon:'🌱', title:'ใส่ปุ๋ยตามระยะการเจริญเติบโต', desc:'ตรวจสอบอายุข้าวและใส่ปุ๋ยสูตรที่เหมาะสม', tag:'ทั่วไป'});
+
+  const list = document.getElementById('reco-list');
+  list.innerHTML = items.map(it => `
+    <div class="reco-item">
+      <span class="reco-icon">${it.icon}</span>
+      <div class="reco-text"><strong>${it.title}</strong><span>${it.desc}</span></div>
+      <span class="reco-tag${it.warn ? ' warn' : ''}">${it.tag}</span>
+    </div>`).join('');
+}
+
+function updateAlerts(s) {
+  const alerts = [];
+  const now = new Date();
+  const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0') + ' น.';
+
+  if (s.rainfall >= 5) alerts.push({icon:'⛈️', type:'warn', title:'ฝนตกหนักในพื้นที่', desc:`ปริมาณฝนสะสม ${s.rainfall} มม.`});
+  if (s.soilMoisture < 35) alerts.push({icon:'🌵', type:'warn', title:'ดินแห้งเกินไป', desc:'ควรเพิ่มน้ำเข้าแปลงนา'});
+  if (s.windSpeed > 20) alerts.push({icon:'💨', type:'danger', title:'ลมแรงผิดปกติ', desc:`ความเร็วลม ${s.windSpeed} กม./ชม.`});
+  alerts.push({icon:'ℹ️', type:'info', title:'อัปเดตพยากรณ์อากาศแล้ว', desc:'พยากรณ์อากาศรายวันพร้อมใช้งาน'});
+
+  const list = document.getElementById('alert-list');
+  list.innerHTML = alerts.slice(0,4).map(a => `
+    <div class="alert-item">
+      <div class="alert-dot ${a.type}">${a.icon}</div>
+      <div class="alert-text"><strong>${a.title}</strong><span>${a.desc}</span></div>
+      <span class="alert-time">${timeStr}</span>
+    </div>`).join('');
+}
+
+function updateHealthDonut(s) {
+  let score = 100;
+  if (s.soilMoisture < 38 || s.soilMoisture > 65) score -= 15;
+  if (s.soilPh < 5.5 || s.soilPh > 7) score -= 15;
+  if (s.humidity > 85) score -= 15;
+  if (s.windSpeed > 22) score -= 10;
+  score = Math.max(40, Math.min(95, score));
+
+  const circumference = 314;
+  const offset = circumference - (circumference * score / 100);
+  document.getElementById('donut-ring').style.strokeDashoffset = offset;
+  document.getElementById('health-pct').textContent = score + '%';
+
+  const soilEl = document.getElementById('hr-soil');
+  const phEl = document.getElementById('hr-ph');
+  const tempEl = document.getElementById('hr-temp');
+  soilEl.textContent = (s.soilMoisture < 38 || s.soilMoisture > 65) ? 'ควรปรับปรุง' : 'เหมาะสม';
+  soilEl.className = (s.soilMoisture < 38 || s.soilMoisture > 65) ? 'warn-txt' : 'ok';
+  phEl.textContent = (s.soilPh < 5.5 || s.soilPh > 7) ? 'ควรปรับปรุง' : 'เหมาะสม';
+  phEl.className = (s.soilPh < 5.5 || s.soilPh > 7) ? 'warn-txt' : 'ok';
+  tempEl.textContent = (s.temp > 36) ? 'ร้อนจัด' : 'ปกติ';
+  tempEl.className = (s.temp > 36) ? 'warn-txt' : 'ok';
+}
+
+function updateMockSensors() {
+  const s = {
+    temp: parseFloat((30 + Math.random() * 3).toFixed(1)),
+    humidity: Math.floor(70 + Math.random() * 15),
+    soilMoisture: Math.floor(30 + Math.random() * 30),
+    soilPh: parseFloat((5.5 + Math.random() * 1.5).toFixed(1)),
+    light: Math.floor(25000 + Math.random() * 20000),
+    windSpeed: Math.floor(5 + Math.random() * 20),
+    windDir: windDirections[Math.floor(Math.random() * windDirections.length)],
+    rainfall: parseFloat((Math.random() * 8).toFixed(1)),
+  };
+
+  document.getElementById('temp-val').textContent = s.temp;
+  document.getElementById('humidity-val').textContent = s.humidity;
+  document.getElementById('soil-moisture-val').textContent = s.soilMoisture;
+  document.getElementById('soil-ph-val').textContent = s.soilPh;
+  document.getElementById('light-val').textContent = s.light.toLocaleString('th-TH');
+  document.getElementById('wind-speed-val').textContent = s.windSpeed;
+  document.getElementById('wind-dir-val').textContent = s.windDir;
+  document.getElementById('rainfall-val').textContent = s.rainfall;
+
+  const nowIcon = document.getElementById('weather-now-icon');
+  const nowDesc = document.getElementById('weather-now-desc');
+  if (s.rainfall >= 5) { nowIcon.textContent = '⛈️'; nowDesc.textContent = 'กำลังฝนตกหนัก'; }
+  else if (s.rainfall >= 1) { nowIcon.textContent = '🌦️'; nowDesc.textContent = 'ฝนตกปรอยๆ บางส่วน'; }
+  else { nowIcon.textContent = '☀️'; nowDesc.textContent = 'ท้องฟ้าโปร่ง แดดจัด'; }
+
+  const now = new Date();
+  document.getElementById('last-updated').textContent =
+    'อัปเดตล่าสุด ' + now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+
+  updateRecommendations(s);
+  updateAlerts(s);
+  updateHealthDonut(s);
+  window.__latestSensors = s;
+}
+
+let simStarted = false;
+function startSimulation() {
+  if (simStarted) return;
+  simStarted = true;
+  buildForecast();
+  updateMockSensors();
+  setInterval(updateMockSensors, 10000);
+}
+
+function getCurrentSensorSummary() {
+  const s = window.__latestSensors || {};
+  return `อุณหภูมิอากาศ ${s.temp}°C, ความชื้นอากาศ ${s.humidity}%, ความชื้นดิน ${s.soilMoisture}%, ` +
+    `pH ดิน ${s.soilPh}, ความเข้มแสง ${s.light} lux, ความเร็วลม ${s.windSpeed} กม./ชม. ทิศ${s.windDir}, ` +
+    `ปริมาณฝน 24 ชม. ${s.rainfall} มม.`;
+}
+
+// ===== ส่วนโมเดล AI คัดแยกใบข้าว + วิเคราะห์โรค (Edge Impulse WASM, รันในเบราว์เซอร์) =====
+// สร้าง leaf-gate worker ทันที ส่วน disease worker สร้างทีหลังตอนรู้ผลว่าใช่ใบข้าวแล้ว
+// (ลดภาระ CPU ไม่ให้ compile wasm 2 ตัวพร้อมกัน ซึ่งเครื่องสเปกจำกัดจะอืดมาก)
+const eiCanvas = document.getElementById('ei-canvas');
+const eiCtx = eiCanvas.getContext('2d', { willReadFrequently: true });
+const leafWorker = new Worker('leaf-worker.js');
+let diseaseWorker = null;
+function getDiseaseWorker() {
+  if (!diseaseWorker) diseaseWorker = new Worker('disease-worker.js');
+  return diseaseWorker;
 }
 
 // วาดรูปลง canvas 224x224 แล้วแพ็ค RGB เป็นเลขเดียวต่อพิกเซล ตามฟอร์แมตที่ Edge Impulse ต้องการ
 function imageToFeatures(img) {
-  ctx.drawImage(img, 0, 0, 224, 224);
-  const { data } = ctx.getImageData(0, 0, 224, 224); // RGBA เรียงทีละพิกเซล
+  eiCtx.drawImage(img, 0, 0, 224, 224);
+  const { data } = eiCtx.getImageData(0, 0, 224, 224);
   const features = new Array(224 * 224);
   for (let i = 0; i < features.length; i++) {
     const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
@@ -114,81 +838,190 @@ function imageToFeatures(img) {
   return features;
 }
 
-function renderBars(results) {
-  const bars = document.getElementById('resultBars');
-  bars.innerHTML = '';
-  results
-    .slice()
-    .sort((a, b) => b.value - a.value)
-    .forEach(r => {
-      const pct = Math.round(r.value * 100);
-      const row = document.createElement('div');
-      row.className = 'bar-row';
-      row.innerHTML = `<span style="width:110px">${r.label}</span>
-        <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
-        <span>${pct}%</span>`;
-      bars.appendChild(row);
-    });
+// รอผลจาก worker แบบ promise พร้อม timeout ยาว (เครื่องสเปกจำกัดอาจ compile wasm ช้าเป็นนาที)
+// และรายงานความคืบหน้าผ่าน onProgress callback (ใช้แสดงในข้อความแชทระหว่างรอ)
+function askWorker(worker, features, label, onProgress, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+    const heartbeat = setInterval(() => {
+      onProgress?.(`⏳ ${label}: ยังประมวลผลอยู่ (${Math.round((Date.now() - startTime) / 1000)} วินาที)...`);
+    }, 10000);
+    const timer = setTimeout(() => {
+      clearInterval(heartbeat);
+      worker.removeEventListener('message', handler);
+      reject(new Error(`${label}: ไม่ตอบกลับภายใน ${timeoutMs / 1000} วินาที`));
+    }, timeoutMs);
+    const handler = (e) => {
+      clearInterval(heartbeat);
+      clearTimeout(timer);
+      worker.removeEventListener('message', handler);
+      if (e.data.error) reject(new Error(`${label}: ${e.data.error}`));
+      else resolve(e.data.result);
+    };
+    worker.addEventListener('message', handler);
+    worker.postMessage({ features });
+  });
 }
 
-async function callGeminiSummary(diseaseLabel, confidence) {
-  const res = await fetch(GEMINI_WORKER_URL, {
+// รันภาพผ่านโมเดล 2 ตัวแบบ cascade: คัดแยกใบข้าวก่อน แล้วค่อยวิเคราะห์โรคถ้าใช่ข้าว
+async function classifyImageCascade(imageEl, onProgress) {
+  const features = imageToFeatures(imageEl);
+
+  onProgress?.('🔍 กำลังตรวจว่าเป็นใบข้าวหรือไม่... (โหลดโมเดลครั้งแรกอาจใช้เวลา 1-2 นาที)');
+  const leafResult = await askWorker(leafWorker, features, 'โมเดลคัดแยกใบข้าว', onProgress);
+  const riceScore = leafResult.results.find(r => r.label === 'Rice')?.value ?? 0;
+  const notRiceScore = leafResult.results.find(r => r.label === 'not Rice')?.value ?? 0;
+
+  if (notRiceScore >= riceScore) {
+    return { isRice: false, leafResult };
+  }
+
+  onProgress?.('🔬 เป็นใบข้าว กำลังวิเคราะห์โรค...');
+  const diseaseResult = await askWorker(getDiseaseWorker(), features, 'โมเดลวิเคราะห์โรค', onProgress);
+  const top = diseaseResult.results.reduce((a, b) => (b.value > a.value ? b : a));
+  return { isRice: true, leafResult, diseaseResult, label: top.label, confidence: top.value };
+}
+
+const chatBox = document.getElementById('chat-box');
+const userInput = document.getElementById('user-input');
+const sendBtn = document.getElementById('send-btn');
+const attachBtn = document.getElementById('attach-btn');
+const imageInput = document.getElementById('image-input');
+const imagePreviewContainer = document.getElementById('image-preview-container');
+const imagePreview = document.getElementById('image-preview');
+const removeImageBtn = document.getElementById('remove-image-btn');
+
+// ห้ามฝัง Gemini API key ไว้ตรงนี้เด็ดขาด (ใครเปิด View Source ก็เห็น) ให้เรียกผ่าน Worker แทน
+// แก้ URL นี้เป็น Cloudflare Worker ที่ deploy ไว้ (ดูวิธี deploy ในคำแนะนำที่แชท)
+const GEMINI_WORKER_URL = "https://your-worker-subdomain.workers.dev";
+
+let selectedImage = null;
+
+attachBtn.addEventListener('click', () => imageInput.click());
+
+imageInput.addEventListener('change', () => {
+  const file = imageInput.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { alert('กรุณาเลือกไฟล์รูปภาพเท่านั้นครับ'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    const base64 = dataUrl.split(',')[1];
+    selectedImage = { base64, mimeType: file.type, dataUrl };
+    imagePreview.src = dataUrl;
+    imagePreviewContainer.style.display = 'flex';
+  };
+  reader.readAsDataURL(file);
+});
+
+removeImageBtn.addEventListener('click', () => {
+  selectedImage = null;
+  imageInput.value = '';
+  imagePreviewContainer.style.display = 'none';
+});
+
+function appendMessage(sender, text, extraClass, imageDataUrl) {
+  const div = document.createElement('div');
+  div.classList.add('message', sender === 'user' ? 'user-message' : 'ai-message');
+  if (extraClass) div.classList.add(extraClass);
+  if (text) div.appendChild(document.createTextNode(text));
+  if (imageDataUrl) {
+    const img = document.createElement('img');
+    img.src = imageDataUrl; img.className = 'chat-thumb'; img.alt = 'รูปที่แนบ';
+    div.appendChild(img);
+  }
+  chatBox.appendChild(div);
+  chatBox.scrollTop = chatBox.scrollHeight;
+  return div;
+}
+
+async function callGeminiAI(prompt, imageData, diagnosis) {
+  let systemInstruction;
+
+  if (diagnosis) {
+    // มีผลจากโมเดล AI (WASM) ยืนยันมาแล้วว่าเป็นใบข้าว และตรวจโรคอะไร
+    // ให้ Gemini ยึดตามผลนี้เป็นหลัก ทำหน้าที่แค่สรุป+แนะนำ ไม่ใช่ตัดสินโรคเอง
+    systemInstruction = "คุณคือผู้เชี่ยวชาญด้านโรคพืชและข้าวไทย\n" +
+      `โมเดล AI เฉพาะทางตรวจรูปใบข้าวที่แนบมาแล้ว ได้ผลว่าเป็น: "${diagnosis.label}" (ความมั่นใจ ${Math.round(diagnosis.confidence * 100)}%)\n\n` +
+      "ให้คุณใช้ผลนี้เป็นหลักเสมอ ห้ามเปลี่ยนชื่อโรคหรือสรุปเป็นโรคอื่น หน้าที่ของคุณคือ:\n" +
+      "1. อธิบายอาการของโรคนี้แบบเข้าใจง่าย (ถ้า label คือ 'Healthy' ให้บอกว่าใบข้าวสุขภาพดี ไม่พบโรค)\n" +
+      "2. บอกสาเหตุหลักที่ทำให้เกิดโรคนี้\n" +
+      "3. แนะนำวิธีดูแล/รักษา พร้อม 'ยี่ห้อปุ๋ย' หรือผลิตภัณฑ์บำรุงพืชที่มีขายจริงในท้องตลาดไทยอย่างเจาะจง\n" +
+      "4. พิจารณาค่าจากเซ็นเซอร์ในแปลงนาที่ให้มาประกอบการแนะนำด้วย (เช่น ถ้าความชื้นสูงเสี่ยงโรคลุกลาม ให้เตือนเพิ่ม)\n\n" +
+      "ตอบเป็นภาษาไทยกระชับ อ่านง่าย";
+  } else {
+    systemInstruction = "คุณคือผู้เชี่ยวชาญด้านโรคพืชและข้าวไทย เมื่อผู้ใช้ถามเกี่ยวกับโรคข้าวหรืออาการผิดปกติ ให้วิเคราะห์โรค บอกวิธีแก้ไขอย่างละเอียด และแนะนำ 'ยี่ห้อปุ๋ย' หรือผลิตภัณฑ์บำรุงพืชที่มีขายจริงในท้องตลาดไทยอย่างเจาะจงด้วย ให้พิจารณาค่าจากเซ็นเซอร์ในแปลงนาที่ให้มาประกอบการวิเคราะห์ด้วย\n\nตอบเป็นภาษาไทยกระชับ อ่านง่าย";
+  }
+
+  const sensorContext = getCurrentSensorSummary();
+  const fullPrompt = `${systemInstruction}\n\nค่าจากเซ็นเซอร์ในแปลงนาขณะนี้: ${sensorContext}\n\nคำถามจากเกษตรกร: ${prompt || '(ไม่มีข้อความ กรุณาวิเคราะห์จากผลที่ตรวจได้)'}`;
+
+  // เรียกผ่าน Cloudflare Worker (key อยู่ฝั่ง server เท่านั้น ไม่ส่งมาที่หน้าเว็บ)
+  const response = await fetch(`${GEMINI_WORKER_URL}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: diseaseLabel, confidence })
+    body: JSON.stringify({
+      prompt: fullPrompt,
+      image: imageData ? { mimeType: imageData.mimeType, base64: imageData.base64 } : null
+    })
   });
-  if (!res.ok) throw new Error('เรียก Gemini ไม่สำเร็จ');
-  const data = await res.json();
-  return data.advice;
+  const data = await response.json();
+  if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+  if (!data.text) throw new Error('ไม่ได้รับข้อความตอบกลับจาก AI');
+  return data.text;
 }
 
-fileInput.addEventListener('change', async () => {
-  const file = fileInput.files[0];
-  if (!file) return;
+async function handleSend() {
+  const text = userInput.value.trim();
+  const imageToSend = selectedImage;
+  if (!text && !imageToSend) return;
+  if (GEMINI_WORKER_URL.includes('your-worker-subdomain')) {
+    alert('ยังไม่ได้ตั้งค่า GEMINI_WORKER_URL ในโค้ด กรุณาแก้เป็น URL ของ Cloudflare Worker ที่ deploy ไว้ก่อนใช้งาน');
+    return;
+  }
 
-  const img = new Image();
-  img.src = URL.createObjectURL(file);
-  await img.decode();
-  preview.src = img.src;
-  preview.style.display = 'block';
-  document.getElementById('result').style.display = 'none';
+  appendMessage('user', text || '📷 ส่งรูปภาพเพื่อขอวิเคราะห์', null, imageToSend ? imageToSend.dataUrl : null);
+  userInput.value = '';
+  removeImageBtn.click();
+  userInput.disabled = true; sendBtn.disabled = true; attachBtn.disabled = true;
+
+  const loadingText = imageToSend ? 'กำลังตรวจดูรูปภาพด้วยโมเดล AI...' : 'กำลังตรวจสอบอาการและค้นหาผลิตภัณฑ์ที่เหมาะสมให้ครับ...';
+  const loadingMsg = appendMessage('ai', loadingText, 'loading');
+  const updateLoading = (t) => { loadingMsg.textContent = t; chatBox.scrollTop = chatBox.scrollHeight; };
 
   try {
-    setStatus('กำลังเตรียมรูปภาพ...');
-    const features = imageToFeatures(img);
+    let diagnosis = null;
 
-    setStatus('กำลังตรวจว่าใช่ใบข้าวหรือไม่...');
-    const leafResult = await askWorker(leafWorker, features, 'leaf-gate');
-    debugLog('✅ leaf-gate ตอบกลับ: ' + JSON.stringify(leafResult.results));
-    const riceScore = leafResult.results.find(r => r.label === 'Rice')?.value ?? 0;
-    const notRiceScore = leafResult.results.find(r => r.label === 'not Rice')?.value ?? 0;
+    if (imageToSend) {
+      // ก่อนเรียก Gemini ให้โมเดล WASM (เทรนเอง) คัดแยกใบข้าว + วิเคราะห์โรคก่อนเสมอ
+      // เพื่อให้ผลแม่นยำและตรวจสอบได้ แทนที่จะให้ Gemini เดาเอง
+      const img = new Image();
+      img.src = imageToSend.dataUrl;
+      await img.decode();
+      const cascade = await classifyImageCascade(img, updateLoading);
 
-    if (notRiceScore >= riceScore) {
-      setStatus('');
-      document.getElementById('resultTitle').textContent = 'ไม่พบว่าเป็นใบข้าวในรูปนี้';
-      renderBars(leafResult.results);
-      document.getElementById('advice').textContent = 'ลองถ่ายรูปใบข้าวให้ชัดเจนและใกล้ขึ้นอีกครั้ง';
-      document.getElementById('result').style.display = 'block';
-      return;
+      if (!cascade.isRice) {
+        loadingMsg.remove();
+        appendMessage('ai', 'จากการตรวจด้วยโมเดล AI รูปนี้ไม่ใช่ใบข้าวครับ ลองถ่ายรูปใบข้าว/ต้นข้าวให้ชัดเจนแล้วส่งมาใหม่ได้เลยนะครับ 🌾');
+        return;
+      }
+      diagnosis = { label: cascade.label, confidence: cascade.confidence };
+      updateLoading(`✅ ตรวจพบ: ${diagnosis.label} (${Math.round(diagnosis.confidence * 100)}%) — กำลังขอคำแนะนำจาก AI...`);
     }
 
-    setStatus('เป็นใบข้าว กำลังวิเคราะห์โรค...');
-    const diseaseResult = await askWorker(diseaseWorker, features, 'disease');
-    const top = diseaseResult.results.reduce((a, b) => (b.value > a.value ? b : a));
-
-    document.getElementById('resultTitle').textContent = `ผลวิเคราะห์: ${top.label} (${Math.round(top.value * 100)}%)`;
-    renderBars(diseaseResult.results);
-    document.getElementById('result').style.display = 'block';
-
-    setStatus('กำลังขอคำแนะนำจาก Gemini...');
-    const advice = await callGeminiSummary(top.label, top.value);
-    document.getElementById('advice').textContent = advice;
-    setStatus('');
+    const aiResponse = await callGeminiAI(text, imageToSend, diagnosis);
+    loadingMsg.remove();
+    appendMessage('ai', aiResponse);
   } catch (err) {
-    debugLog('❌ ' + err.message);
-    setStatus('เกิดข้อผิดพลาด: ' + err.message);
+    loadingMsg.remove();
+    appendMessage('ai', `เกิดข้อผิดพลาด: ${err.message}\n(ตรวจสอบว่า Worker deploy สำเร็จและตั้งค่า GEMINI_API_KEY secret ไว้แล้ว)`, 'error');
+  } finally {
+    userInput.disabled = false; sendBtn.disabled = false; attachBtn.disabled = false; userInput.focus();
   }
-});
+}
+
+sendBtn.addEventListener('click', handleSend);
+userInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSend(); });
 </script>
 </body>
 </html>
