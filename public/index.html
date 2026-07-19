@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>ตรวจโรคข้าวจากรูปภาพ</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; }
+  #preview { max-width: 100%; border-radius: 8px; margin: 12px 0; display: none; }
+  #status { color: #666; font-size: 14px; }
+  #result { margin-top: 16px; padding: 16px; border-radius: 8px; background: #f4f4f4; display: none; }
+  #result h3 { margin: 0 0 8px; }
+  .bar-row { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 4px 0; }
+  .bar-track { flex: 1; background: #ddd; border-radius: 4px; height: 8px; overflow: hidden; }
+  .bar-fill { height: 100%; background: #2a7; }
+</style>
+</head>
+<body>
+  <h1>ตรวจโรคใบข้าว</h1>
+  <p>อัปโหลดรูปใบข้าว ระบบจะคัดแยกก่อนว่าใช่ใบข้าวหรือไม่ แล้วค่อยวิเคราะห์โรค</p>
+
+  <input type="file" id="fileInput" accept="image/*">
+  <img id="preview">
+  <p id="status"></p>
+
+  <div id="result">
+    <h3 id="resultTitle"></h3>
+    <div id="resultBars"></div>
+    <p id="advice"></p>
+  </div>
+
+  <!-- canvas ที่มองไม่เห็น ใช้แค่ resize รูปเป็น 224x224 -->
+  <canvas id="canvas" width="224" height="224" style="display:none"></canvas>
+
+<script>
+// ปรับ URL นี้เป็น Cloudflare Worker ที่คุณ deploy ไว้สำหรับเรียก Gemini
+const GEMINI_WORKER_URL = "https://your-worker-subdomain.workers.dev/summarize";
+
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('preview');
+const statusEl = document.getElementById('status');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+// สร้าง web worker แยกกันคนละตัว เพื่อไม่ให้ Module ของ Edge Impulse ทับกัน
+const leafWorker = new Worker('leaf-worker.js');
+const diseaseWorker = new Worker('disease-worker.js');
+
+function setStatus(text) { statusEl.textContent = text; }
+
+// รอผลจาก worker แบบ promise (ยิงคำขอเดียว รอผลเดียว)
+function askWorker(worker, features) {
+  return new Promise((resolve, reject) => {
+    const handler = (e) => {
+      worker.removeEventListener('message', handler);
+      if (e.data.error) reject(new Error(e.data.error));
+      else resolve(e.data.result);
+    };
+    worker.addEventListener('message', handler);
+    worker.postMessage({ features });
+  });
+}
+
+// วาดรูปลง canvas 224x224 แล้วแพ็ค RGB เป็นเลขเดียวต่อพิกเซล ตามฟอร์แมตที่ Edge Impulse ต้องการ
+function imageToFeatures(img) {
+  ctx.drawImage(img, 0, 0, 224, 224);
+  const { data } = ctx.getImageData(0, 0, 224, 224); // RGBA เรียงทีละพิกเซล
+  const features = new Array(224 * 224);
+  for (let i = 0; i < features.length; i++) {
+    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+    features[i] = (r << 16) | (g << 8) | b;
+  }
+  return features;
+}
+
+function renderBars(results) {
+  const bars = document.getElementById('resultBars');
+  bars.innerHTML = '';
+  results
+    .slice()
+    .sort((a, b) => b.value - a.value)
+    .forEach(r => {
+      const pct = Math.round(r.value * 100);
+      const row = document.createElement('div');
+      row.className = 'bar-row';
+      row.innerHTML = `<span style="width:110px">${r.label}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
+        <span>${pct}%</span>`;
+      bars.appendChild(row);
+    });
+}
+
+async function callGeminiSummary(diseaseLabel, confidence) {
+  const res = await fetch(GEMINI_WORKER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label: diseaseLabel, confidence })
+  });
+  if (!res.ok) throw new Error('เรียก Gemini ไม่สำเร็จ');
+  const data = await res.json();
+  return data.advice;
+}
+
+fileInput.addEventListener('change', async () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+
+  const img = new Image();
+  img.src = URL.createObjectURL(file);
+  await img.decode();
+  preview.src = img.src;
+  preview.style.display = 'block';
+  document.getElementById('result').style.display = 'none';
+
+  try {
+    setStatus('กำลังเตรียมรูปภาพ...');
+    const features = imageToFeatures(img);
+
+    setStatus('กำลังตรวจว่าใช่ใบข้าวหรือไม่...');
+    const leafResult = await askWorker(leafWorker, features);
+    const riceScore = leafResult.results.find(r => r.label === 'Rice')?.value ?? 0;
+    const notRiceScore = leafResult.results.find(r => r.label === 'not Rice')?.value ?? 0;
+
+    if (notRiceScore >= riceScore) {
+      setStatus('');
+      document.getElementById('resultTitle').textContent = 'ไม่พบว่าเป็นใบข้าวในรูปนี้';
+      renderBars(leafResult.results);
+      document.getElementById('advice').textContent = 'ลองถ่ายรูปใบข้าวให้ชัดเจนและใกล้ขึ้นอีกครั้ง';
+      document.getElementById('result').style.display = 'block';
+      return;
+    }
+
+    setStatus('เป็นใบข้าว กำลังวิเคราะห์โรค...');
+    const diseaseResult = await askWorker(diseaseWorker, features);
+    const top = diseaseResult.results.reduce((a, b) => (b.value > a.value ? b : a));
+
+    document.getElementById('resultTitle').textContent = `ผลวิเคราะห์: ${top.label} (${Math.round(top.value * 100)}%)`;
+    renderBars(diseaseResult.results);
+    document.getElementById('result').style.display = 'block';
+
+    setStatus('กำลังขอคำแนะนำจาก Gemini...');
+    const advice = await callGeminiSummary(top.label, top.value);
+    document.getElementById('advice').textContent = advice;
+    setStatus('');
+  } catch (err) {
+    setStatus('เกิดข้อผิดพลาด: ' + err.message);
+  }
+});
+</script>
+</body>
+</html>
