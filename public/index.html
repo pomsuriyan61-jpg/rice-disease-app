@@ -45,17 +45,45 @@ const ctx = canvas.getContext('2d', { willReadFrequently: true });
 const leafWorker = new Worker('leaf-worker.js');
 const diseaseWorker = new Worker('disease-worker.js');
 
+// กล่อง debug log ที่มองเห็นได้บนหน้าเว็บ (ไม่ต้องพึ่ง DevTools/Console)
+const debugBox = document.createElement('pre');
+debugBox.style.cssText = 'background:#222;color:#0f0;padding:10px;font-size:12px;white-space:pre-wrap;max-height:200px;overflow:auto;margin-top:16px;border-radius:6px;';
+document.body.appendChild(debugBox);
+function debugLog(text) {
+  const time = new Date().toLocaleTimeString();
+  debugBox.textContent += `[${time}] ${text}\n`;
+  debugBox.scrollTop = debugBox.scrollHeight;
+}
+
+// ดักจับ error ที่เกิดตอนโหลด worker เอง (เช่น importScripts หาไฟล์ไม่เจอ)
+leafWorker.onerror = (e) => {
+  debugLog(`❌ leaf-worker error: ${e.message} (${e.filename}:${e.lineno})`);
+  setStatus('เกิดข้อผิดพลาดตอนโหลดโมเดลคัดแยกใบข้าว ดู log ด้านล่าง');
+};
+diseaseWorker.onerror = (e) => {
+  debugLog(`❌ disease-worker error: ${e.message} (${e.filename}:${e.lineno})`);
+  setStatus('เกิดข้อผิดพลาดตอนโหลดโมเดลวิเคราะห์โรค ดู log ด้านล่าง');
+};
+
+debugLog('เริ่มโหลด worker ทั้งสองตัว...');
+
 function setStatus(text) { statusEl.textContent = text; }
 
-// รอผลจาก worker แบบ promise (ยิงคำขอเดียว รอผลเดียว)
-function askWorker(worker, features) {
+// รอผลจาก worker แบบ promise (ยิงคำขอเดียว รอผลเดียว) พร้อม timeout กันค้างตลอดกาล
+function askWorker(worker, features, label, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
-    const handler = (e) => {
+    const timer = setTimeout(() => {
       worker.removeEventListener('message', handler);
-      if (e.data.error) reject(new Error(e.data.error));
+      reject(new Error(`${label}: ไม่ตอบกลับภายใน ${timeoutMs / 1000} วินาที (อาจโหลดโมเดลไม่สำเร็จ)`));
+    }, timeoutMs);
+    const handler = (e) => {
+      clearTimeout(timer);
+      worker.removeEventListener('message', handler);
+      if (e.data.error) reject(new Error(`${label}: ${e.data.error}`));
       else resolve(e.data.result);
     };
     worker.addEventListener('message', handler);
+    debugLog(`ส่งข้อมูลไป ${label}...`);
     worker.postMessage({ features });
   });
 }
@@ -116,7 +144,8 @@ fileInput.addEventListener('change', async () => {
     const features = imageToFeatures(img);
 
     setStatus('กำลังตรวจว่าใช่ใบข้าวหรือไม่...');
-    const leafResult = await askWorker(leafWorker, features);
+    const leafResult = await askWorker(leafWorker, features, 'leaf-gate');
+    debugLog('✅ leaf-gate ตอบกลับ: ' + JSON.stringify(leafResult.results));
     const riceScore = leafResult.results.find(r => r.label === 'Rice')?.value ?? 0;
     const notRiceScore = leafResult.results.find(r => r.label === 'not Rice')?.value ?? 0;
 
@@ -130,7 +159,7 @@ fileInput.addEventListener('change', async () => {
     }
 
     setStatus('เป็นใบข้าว กำลังวิเคราะห์โรค...');
-    const diseaseResult = await askWorker(diseaseWorker, features);
+    const diseaseResult = await askWorker(diseaseWorker, features, 'disease');
     const top = diseaseResult.results.reduce((a, b) => (b.value > a.value ? b : a));
 
     document.getElementById('resultTitle').textContent = `ผลวิเคราะห์: ${top.label} (${Math.round(top.value * 100)}%)`;
@@ -142,6 +171,7 @@ fileInput.addEventListener('change', async () => {
     document.getElementById('advice').textContent = advice;
     setStatus('');
   } catch (err) {
+    debugLog('❌ ' + err.message);
     setStatus('เกิดข้อผิดพลาด: ' + err.message);
   }
 });
