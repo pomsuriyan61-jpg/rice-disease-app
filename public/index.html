@@ -471,7 +471,7 @@
           <button id="send-btn">ส่ง</button>
         </div>
       </div>
-      <!-- canvas ที่มองไม่เห็น ใช้ resize รูปเป็น 224x224 ก่อนป้อนเข้าโมเดล WASM คัดแยกใบข้าว/วิเคราะห์โรค -->
+      <!-- canvas ตัวนี้ไม่ได้ใช้แล้ว (ย้ายการ resize รูปไปทำที่ server แทน) -->
       <canvas id="ei-canvas" width="224" height="224" style="display:none"></canvas>
 
     </div>
@@ -814,72 +814,28 @@ function getCurrentSensorSummary() {
     `ปริมาณฝน 24 ชม. ${s.rainfall} มม.`;
 }
 
-// ===== ส่วนโมเดล AI คัดแยกใบข้าว + วิเคราะห์โรค (Edge Impulse WASM, รันในเบราว์เซอร์) =====
-// สร้าง leaf-gate worker ทันที ส่วน disease worker สร้างทีหลังตอนรู้ผลว่าใช่ใบข้าวแล้ว
-// (ลดภาระ CPU ไม่ให้ compile wasm 2 ตัวพร้อมกัน ซึ่งเครื่องสเปกจำกัดจะอืดมาก)
-const eiCanvas = document.getElementById('ei-canvas');
-const eiCtx = eiCanvas.getContext('2d', { willReadFrequently: true });
-const leafWorker = new Worker('leaf-worker.js');
-let diseaseWorker = null;
-function getDiseaseWorker() {
-  if (!diseaseWorker) diseaseWorker = new Worker('disease-worker.js');
-  return diseaseWorker;
-}
-
-// วาดรูปลง canvas 224x224 แล้วแพ็ค RGB เป็นเลขเดียวต่อพิกเซล ตามฟอร์แมตที่ Edge Impulse ต้องการ
-function imageToFeatures(img) {
-  eiCtx.drawImage(img, 0, 0, 224, 224);
-  const { data } = eiCtx.getImageData(0, 0, 224, 224);
-  const features = new Array(224 * 224);
-  for (let i = 0; i < features.length; i++) {
-    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
-    features[i] = (r << 16) | (g << 8) | b;
-  }
-  return features;
-}
-
-// รอผลจาก worker แบบ promise พร้อม timeout ยาว (เครื่องสเปกจำกัดอาจ compile wasm ช้าเป็นนาที)
-// และรายงานความคืบหน้าผ่าน onProgress callback (ใช้แสดงในข้อความแชทระหว่างรอ)
-function askWorker(worker, features, label, onProgress, timeoutMs = 120000) {
-  return new Promise((resolve, reject) => {
-    const startTime = Date.now();
-    const heartbeat = setInterval(() => {
-      onProgress?.(`⏳ ${label}: ยังประมวลผลอยู่ (${Math.round((Date.now() - startTime) / 1000)} วินาที)...`);
-    }, 10000);
-    const timer = setTimeout(() => {
-      clearInterval(heartbeat);
-      worker.removeEventListener('message', handler);
-      reject(new Error(`${label}: ไม่ตอบกลับภายใน ${timeoutMs / 1000} วินาที`));
-    }, timeoutMs);
-    const handler = (e) => {
-      clearInterval(heartbeat);
-      clearTimeout(timer);
-      worker.removeEventListener('message', handler);
-      if (e.data.error) reject(new Error(`${label}: ${e.data.error}`));
-      else resolve(e.data.result);
-    };
-    worker.addEventListener('message', handler);
-    worker.postMessage({ features });
-  });
-}
+// ===== ส่วนโมเดล AI คัดแยกใบข้าว + วิเคราะห์โรค =====
+// รันบน inference server แยกต่างหาก (ไม่ใช่ในเบราว์เซอร์) เพราะเครื่องผู้ใช้บางเครื่อง
+// สเปกไม่พอจะ compile โมเดล WASM ขนาด ~10MB ได้ทันเวลา ให้ server แรงๆ ประมวลผลแทน
+// แก้ URL นี้เป็น URL ของ inference server ที่ deploy ไว้ (ดูวิธี deploy ในคำแนะนำที่แชท)
+const CLASSIFY_SERVER_URL = "https://your-inference-server.onrender.com";
 
 // รันภาพผ่านโมเดล 2 ตัวแบบ cascade: คัดแยกใบข้าวก่อน แล้วค่อยวิเคราะห์โรคถ้าใช่ข้าว
-async function classifyImageCascade(imageEl, onProgress) {
-  const features = imageToFeatures(imageEl);
+// ส่งรูปแบบ base64 ไปให้ server จัดการ resize + preprocess + classify ให้ทั้งหมด
+async function classifyImageCascade(base64DataUrl, onProgress) {
+  onProgress?.('🔍 กำลังส่งรูปไปตรวจกับ AI server...');
+  const response = await fetch(`${CLASSIFY_SERVER_URL}/classify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: base64DataUrl })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
-  onProgress?.('🔍 กำลังตรวจว่าเป็นใบข้าวหรือไม่... (โหลดโมเดลครั้งแรกอาจใช้เวลา 1-2 นาที)');
-  const leafResult = await askWorker(leafWorker, features, 'โมเดลคัดแยกใบข้าว', onProgress);
-  const riceScore = leafResult.results.find(r => r.label === 'Rice')?.value ?? 0;
-  const notRiceScore = leafResult.results.find(r => r.label === 'not Rice')?.value ?? 0;
-
-  if (notRiceScore >= riceScore) {
-    return { isRice: false, leafResult };
+  if (!data.isRice) {
+    return { isRice: false, leafResults: data.leafResults };
   }
-
-  onProgress?.('🔬 เป็นใบข้าว กำลังวิเคราะห์โรค...');
-  const diseaseResult = await askWorker(getDiseaseWorker(), features, 'โมเดลวิเคราะห์โรค', onProgress);
-  const top = diseaseResult.results.reduce((a, b) => (b.value > a.value ? b : a));
-  return { isRice: true, leafResult, diseaseResult, label: top.label, confidence: top.value };
+  return { isRice: true, label: data.label, confidence: data.confidence, diseaseResults: data.diseaseResults };
 }
 
 const chatBox = document.getElementById('chat-box');
@@ -893,7 +849,7 @@ const removeImageBtn = document.getElementById('remove-image-btn');
 
 // ห้ามฝัง Gemini API key ไว้ตรงนี้เด็ดขาด (ใครเปิด View Source ก็เห็น) ให้เรียกผ่าน Worker แทน
 // แก้ URL นี้เป็น Cloudflare Worker ที่ deploy ไว้ (ดูวิธี deploy ในคำแนะนำที่แชท)
-const GEMINI_WORKER_URL = "https://gemini-worker.pomsuriyan61.workers.dev";
+const GEMINI_WORKER_URL = "https://your-worker-subdomain.workers.dev";
 
 let selectedImage = null;
 
@@ -993,12 +949,9 @@ async function handleSend() {
     let diagnosis = null;
 
     if (imageToSend) {
-      // ก่อนเรียก Gemini ให้โมเดล WASM (เทรนเอง) คัดแยกใบข้าว + วิเคราะห์โรคก่อนเสมอ
+      // ก่อนเรียก Gemini ให้โมเดล AI (เทรนเอง) คัดแยกใบข้าว + วิเคราะห์โรคก่อนเสมอ
       // เพื่อให้ผลแม่นยำและตรวจสอบได้ แทนที่จะให้ Gemini เดาเอง
-      const img = new Image();
-      img.src = imageToSend.dataUrl;
-      await img.decode();
-      const cascade = await classifyImageCascade(img, updateLoading);
+      const cascade = await classifyImageCascade(imageToSend.dataUrl, updateLoading);
 
       if (!cascade.isRice) {
         loadingMsg.remove();
